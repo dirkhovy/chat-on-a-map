@@ -1,0 +1,30 @@
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.cm as cm
+from mpl_toolkits.basemap import Basemap
+import Image
+
+x = np.random.uniform(10.386039, 10.457837, 100) #longitudes
+y = np.random.uniform(55.399859, 55.419227, 100) #latitudes
+  
+m = Basemap(llcrnrlon=10.386039,llcrnrlat=55.399859,urcrnrlon=10.457837,urcrnrlat=55.419227,lat_ts=2,
+            resolution='l',projection='merc',lon_0=10.415,lat_0=55.399859)
+
+tmpdir = '/tmp'
+#size = [1679, 800]
+#size = [600, 300]
+#im = Image.open("/Users/dirkhovy/working/lowlands/sociolinguistics/movement/data/originals/Oversigtskort_Vollsmose_2.PNG")
+#im2 = im.resize(size, Image.ANTIALIAS)
+#im2.save(tmpdir+'/resized.png', "PNG")
+#m.warpimage(tmpdir+'/resized.png')
+
+im=plt.imread('/Users/dirkhovy/working/lowlands/sociolinguistics/movement/data/originals/Oversigtskort_Vollsmose_2.PNG')
+
+m.imshow(im, interpolation='lanczos', origin='upper')
+
+x1,y1 = m(x,y)
+
+#m.drawmapboundary(fill_color='white') # fill to edge
+#m.scatter(x1, y1, s=5, c='r', marker="o", cmap=cm.jet, alpha=1.0)
+
+plt.show()
