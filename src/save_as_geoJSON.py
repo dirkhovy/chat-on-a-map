@@ -11,11 +11,13 @@ import numpy as np
 from skimage import color, measure
 from scipy import ndimage
 from skimage.morphology import binary_erosion, binary_dilation
-from skimage.measure import approximate_polygon
+from skimage.measure import approximate_polygon, regionprops
 import argparse
 import json
 
 # parse command line options
+from skimage.segmentation import clear_border
+
 parser = argparse.ArgumentParser(description="""read a ONG file and output as geoJSON object""")
 parser.add_argument("input", help="input file", nargs='+')
 parser.add_argument("--town", help="which town to choose", choices=['vollsmose', 'bylderup'], required=True)
@@ -26,8 +28,12 @@ args = parser.parse_args()
 coords = {'vollsmose':{'left_edge_lng': 10.386036,
                        'bottom_edge_lat': 55.400343,
                        'right_edge_lng': 10.457705,
-                       'top_edge_lat': 55.419517},
-          'bylderup':{'lllon': 8.86837, 'lllat': 54.889246, 'urlon': 9.445496, 'urlat': 55.065394}
+                       'top_edge_lat': 55.419517,
+                       'map_shape': (859, 1676)
+                      },
+          'bylderup':{'lllon': 8.86837, 'lllat': 54.889246, 'urlon': 9.445496, 'urlat': 55.065394,
+                      'map_shape': (800, 1679)
+                     }
 }
 
 bg_imgs = {'vollsmose': "/Users/dirkhovy/Dropbox/working/lowlands/sociolinguistics/chat-on-a-map/data/originals/Oversigtskort_Vollsmose_2.PNG",
@@ -36,8 +42,19 @@ bg_imgs = {'vollsmose': "/Users/dirkhovy/Dropbox/working/lowlands/sociolinguisti
 #            'vollsmose':'/Users/dirkhovy/Dropbox/working/lowlands/sociolinguistics/chat-on-a-map/data/vollsmose_OSM.png'
            }
 
+def convert_to_lat_lng(xy, left_edge_lng, right_edge_lng, top_edge_lat, bottom_edge_lat, map_shape):
+    """Return a transformed coordinate array with the same dimensions as `xy` in (lat, lng) order"""
+    geo = np.zeros_like(xy)
+    # Pixel coordinates for latitude are reversed
+    dist_lat = (top_edge_lat - bottom_edge_lat)
+    relative_dist_from_top = xy[:, 0] / map_shape[0]
+    geo[:, 0] = bottom_edge_lat + (1 - relative_dist_from_top) * dist_lat
 
-def get_contour(image):
+    dist_lng = (left_edge_lng - right_edge_lng)
+    geo[:, 1] = left_edge_lng - (xy[:, 1] / map_shape[1]) * dist_lng
+    return geo
+
+def get_polygons(image):
     """
     extract the shapes and their contours
     :param image:
@@ -51,12 +68,31 @@ def get_contour(image):
     # make sure it's closed
     bwimg = binary_dilation(bwimg, None)
     bwimg = ndimage.binary_fill_holes(bwimg)
-    # shrink it
-    bwimg = binary_erosion(bwimg)
 
-    contours = [approximate_polygon(new_s, 0.9) for new_s in measure.find_contours(bwimg, 0.5)]
+    bwimg = clear_border(bwimg)
 
-    return np.where(bwimg > 0, 1, 0), contours
+    labeled_img = measure.label(bwimg, background=0)
+
+    polygons = []
+
+    for region in regionprops(labeled_img):
+        # skip small images
+        if region.area < 100:
+            continue
+        for contour in measure.find_contours(bwimg == region.label, 0.5):
+            # Is shape closed?
+            if tuple(contour[0]) == tuple(contour[-1]):
+                poly = approximate_polygon(contour, tolerance=5)
+
+                geo = convert_to_lat_lng(poly, **coords[town])
+                #             y = np.abs(y - map_height)
+
+                lat = geo[:, 0]
+                lng = geo[:, 1]
+                polygons.append(Polygon(zip(lng, lat)))
+
+
+    return polygons
 
 
 def magnify(org, x_factor, y_factor):
@@ -124,37 +160,12 @@ for file_name in sorted(args.input):
 
     town_initial, subject_id, map_type = os.path.basename(file_name).replace('.png', "").split('_')
 
-    b2, im2 = get_contour(file_name)
-    heatmap += b2
+    polygons = get_polygons(file_name)
 
     if show_contours:
         multi_polygon = {"type": "MultiPolygon", "coordinates": []}
 
-        for c, contour in enumerate(im2):
-            # scale up dimensions to map size
-            x, y = contour[:, 1] * x_factor, contour[:, 0] * y_factor
-
-            # invert the y-axis
-            y = np.abs(y - map_height)
-
-            m.plot(x, y, linewidth=3)
-
-            # convert to coordinates
-            lng, lat = m(x, y, inverse=True)
-            print lng.shape, lat.shape
-            # cast as Polygon
-            poly = Polygon(zip(lng, lat))
-            #get center
-            center = poly.centroid
-            print center
-            center_x, center_y = center.coords[0]
-            xpt, ypt = m(center_x, center_y)
-
-            poly_g = transform(project, poly)
-            # compute area
-            km2 = poly_g.area / 1000000.0
-            plt.text(xpt, ypt-50, '%.3fW/%.3fN\n%.2fkm^2' % (center_x, center_y, km2))
-
+        for poly in polygons:
             multi_polygon['coordinates'].append(mapping(poly)['coordinates'])
 
         # save geoJSON
@@ -167,9 +178,9 @@ for file_name in sorted(args.input):
 
 output_file.write(json.dumps(outputs))
 # invert y
-heatmap = np.flipud(heatmap)
+# heatmap = np.flipud(heatmap)
 # scale heatmap to map size
-larger_heatmap = sp.ndimage.interpolation.zoom(heatmap, (x_factor, y_factor))
+# larger_heatmap = sp.ndimage.interpolation.zoom(heatmap, (x_factor, y_factor))
 # plot
-plt.imshow(larger_heatmap, alpha=0.3)
-plt.show()
+# plt.imshow(larger_heatmap, alpha=0.3)
+# plt.show()
