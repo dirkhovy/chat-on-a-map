@@ -17,11 +17,13 @@ import json
 
 # parse command line options
 from skimage.segmentation import clear_border
+import sys
 
 parser = argparse.ArgumentParser(description="""read a ONG file and output as geoJSON object""")
 parser.add_argument("input", help="input file", nargs='+')
 parser.add_argument("--town", help="which town to choose", choices=['vollsmose', 'bylderup'], required=True)
 parser.add_argument("--output", help="output file name", required=False, default="output")
+parser.add_argument("--point", help="map type is a point, not a polygon", required=False, action='store_true')
 args = parser.parse_args()
 
 
@@ -31,7 +33,10 @@ coords = {'vollsmose':{'left_edge_lng': 10.386036,
                        'top_edge_lat': 55.419517,
                        'map_shape': (859, 1676)
                       },
-          'bylderup':{'lllon': 8.86837, 'lllat': 54.889246, 'urlon': 9.445496, 'urlat': 55.065394,
+          'bylderup':{'left_edge_lng': 8.86837,
+                      'bottom_edge_lat': 54.889246,
+                      'right_edge_lng': 9.445496,
+                      'top_edge_lat': 55.065394,
                       'map_shape': (800, 1679)
                      }
 }
@@ -89,7 +94,7 @@ def get_polygons(image):
 
                 lat = geo[:, 0]
                 lng = geo[:, 1]
-                polygons.append(Polygon(zip(lng, lat)))
+                polygons.append(Polygon(list(zip(lng, lat))))
 
 
     return polygons
@@ -133,9 +138,9 @@ m.imshow(background, interpolation='lanczos', origin='upper')
 map_width, map_height = m(coords[town]['right_edge_lng'], coords[town]['top_edge_lat'])
 x_factor = map_height / background.shape[0]
 y_factor = map_width / background.shape[1]
-print background.shape
-print "Map size: %d width, %d height" % (map_width, map_height)
-print "Scaling factors: x=%.4f, y=%.4f" % (x_factor, y_factor)
+print(background.shape)
+print("Map size: %d width, %d height" % (map_width, map_height))
+print("Scaling factors: x=%.4f, y=%.4f" % (x_factor, y_factor))
 
 show_contours = True
 
@@ -156,27 +161,40 @@ outputs = {"type": "FeatureCollection",
            "features": []
 }
 
-for file_name in sorted(args.input):
+for fid, file_name in enumerate(sorted(args.input)):
 
-    town_initial, subject_id, map_type = os.path.basename(file_name).replace('.png', "").split('_')
+    if fid > 0:
+        if fid % 10 == 0:
+            print("%s" % (fid), file=sys.stderr)
+        else:
+            print('.', file=sys.stderr, end=' ')
 
-    polygons = get_polygons(file_name)
+    try:
+        town_initial, subject_id, map_type = os.path.basename(file_name).replace('.png', "").split('_')
 
-    if show_contours:
-        multi_polygon = {"type": "MultiPolygon", "coordinates": []}
+        polygons = get_polygons(file_name)
 
-        for poly in polygons:
-            multi_polygon['coordinates'].append(mapping(poly)['coordinates'])
+        if show_contours:
+            multi_polygon = {"type": "MultiPolygon", "coordinates": []}
 
-        # save geoJSON
-        geojson = {"type": "Feature",
-                   "geometry": multi_polygon,
-                   "properties": {"town": args.town, "subject_id": subject_id, "map_type": map_type}
-        }
+            for poly in polygons:
+                multi_polygon['coordinates'].append(mapping(poly)['coordinates'])
 
-        outputs['features'].append(geojson)
+            # save geoJSON
+            geojson = {"type": "Feature",
+                       "geometry": multi_polygon,
+                       "properties": {"town": args.town, "subject_id": subject_id, "map_type": map_type}
+            }
 
+            outputs['features'].append(geojson)
+
+    except ValueError:
+        print("Error in file %s" % (file_name), file=sys.stderr)
+        pass
+
+print("\nprocessed %s files\n" % (fid), file=sys.stderr)
 output_file.write(json.dumps(outputs))
+
 # invert y
 # heatmap = np.flipud(heatmap)
 # scale heatmap to map size
