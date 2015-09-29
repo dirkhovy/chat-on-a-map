@@ -1,6 +1,7 @@
 import os
 import argparse
 import json
+import math
 from shapely.geometry import Polygon, mapping
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,6 +18,7 @@ parser.add_argument("input", help="input file", nargs='+')
 parser.add_argument("--output", help="output file name", required=False, default="output")
 parser.add_argument("--point", help="map type is a point, not a polygon", required=False, action='store_true')
 parser.add_argument('--property-file', help="Read additional informant properties from this file")
+parser.add_argument("--town", help="which town to choose", choices=['vollsmose', 'bylderup'], required=True)
 args = parser.parse_args()
 
 coords = {'vollsmose':{'left_edge_lng': 10.386036,
@@ -38,7 +40,7 @@ class NumpyAwareJSONEncoder(json.JSONEncoder):
             return obj.tolist()
         elif isinstance(obj, np.generic):
             return obj.item()
-        return json.JSONEncoder.default(self, item)
+        return json.JSONEncoder.default(self, obj)
 
 
 def convert_to_lat_lng(xy, left_edge_lng, right_edge_lng, top_edge_lat, bottom_edge_lat, map_shape):
@@ -100,17 +102,6 @@ if args.property_file:
     subject_props = pd.read_csv(args.property_file, sep=';')
     subject_props = subject_props.set_index('alias')
 
-# load the appropriate background image
-background = plt.imread(bg_imgs[town])
-m.imshow(background, interpolation='lanczos', origin='upper')
-map_width, map_height = m(coords[town]['right_edge_lng'], coords[town]['top_edge_lat'])
-x_factor = map_height / background.shape[0]
-y_factor = map_width / background.shape[1]
-print(background.shape)
-print("Map size: %d width, %d height" % (map_width, map_height))
-print("Scaling factors: x=%.4f, y=%.4f" % (x_factor, y_factor))
-
-
 # Join individual files in single output file
 output_file = open(args.output, 'w')
 outputs = {"type": "FeatureCollection",
@@ -126,22 +117,31 @@ for fid, file_name in enumerate(sorted(args.input)):
 
     try:
         town_initial, subject_id, map_type = os.path.basename(file_name).replace('.png', "").split('_')
+        town = 'bylderup' if town_initial == 'B' else 'vollsmose'
 
-        polygons = get_polygons(file_name)
+        polygons = get_polygons(file_name, town)
 
-        if show_contours:
-            multi_polygon = {"type": "MultiPolygon", "coordinates": []}
+        multi_polygon = {"type": "MultiPolygon", "coordinates": []}
 
-            for poly in polygons:
-                multi_polygon['coordinates'].append(mapping(poly)['coordinates'])
+        for poly in polygons:
+            multi_polygon['coordinates'].append(mapping(poly)['coordinates'])
 
-            # save geoJSON
-            geojson = {"type": "Feature",
-                       "geometry": multi_polygon,
-                       "properties": {"town": args.town, "subject_id": subject_id, "map_type": map_type}
-            }
+        # save geoJSON
+        geojson = {"type": "Feature",
+                   "geometry": multi_polygon,
+                   "properties": {"town": town, "subject_id": subject_id, "map_type": map_type}
+                   }
 
-            outputs['features'].append(geojson)
+        if subject_props is not None:
+            props = subject_props.ix[subject_id].to_dict()
+            # Omit all undefined values
+            for k in list(props.keys()):
+                if isinstance(props[k], float) and math.isnan(props[k]):
+                    del props[k]
+            # geojson['properties']['gender'] = props['gender']
+            geojson['properties'].update(props)
+
+        outputs['features'].append(geojson)
 
     except ValueError:
         print("Error in file %s" % (file_name), file=sys.stderr)

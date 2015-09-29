@@ -7,7 +7,7 @@ from skimage import color, measure
 from skimage.measure import approximate_polygon
 from skimage.morphology import binary_dilation, binary_erosion
 from shapely.geometry import shape, Point, Polygon
-
+w
 
 # add layers
 def get_contour(image):
