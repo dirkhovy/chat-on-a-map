@@ -29,7 +29,7 @@ coords = {'vollsmose':{'left_edge_lng': 10.386036,
                       'bottom_edge_lat': 54.889246,
                       'right_edge_lng': 9.445496,
                       'top_edge_lat': 55.065394,
-                      'map_shape': (800, 1679)
+                      'map_shape': (902, 1679)
                      }}
 
 class NumpyAwareJSONEncoder(json.JSONEncoder):
